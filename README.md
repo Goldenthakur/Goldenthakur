@@ -59,3 +59,22 @@ The app extracts amount and category from the text automatically.
 
 - This is a starter MVP designed to be easy to extend.
 - Real-time bank sync and speech-to-text can be integrated next (for example via Plaid and Whisper APIs).
+
+## Android support
+
+Yes — this project can be used on Android phones, with two practical approaches:
+
+1. **Fastest (recommended): run as a hosted Streamlit web app**
+   - Deploy the app to a server (Streamlit Community Cloud, Render, AWS, etc.).
+   - Open it in Chrome on Android and optionally **"Add to Home screen"** for an app-like shortcut.
+   - Best choice for MVPs and frequent updates.
+
+2. **App-store style wrapper: package a WebView shell**
+   - Wrap the hosted URL in an Android WebView container (for example with Capacitor/Cordova/native Android).
+   - Gives you an APK/AAB for Play Store distribution.
+   - Useful if you need push notifications, app listing, or tighter mobile branding.
+
+### Important limitations for Android
+
+- Streamlit is a **web framework**, not a native Android framework.
+- For a fully offline/native experience, rebuild the frontend in a mobile stack (Flutter/React Native/Kotlin) and keep this Python logic behind an API.
