@@ -6,6 +6,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+from pypdf import PdfReader
 
 
 CATEGORIES = {
@@ -93,22 +94,34 @@ def add_expense(spent_on: date, description: str, amount: float, mode: Optional[
 
 def upload_online_transactions() -> None:
     st.subheader("1) Detect online spends automatically")
-    st.caption("Upload a CSV with columns: date, description, amount.")
+    st.caption("Upload a CSV (or PDF bank statement) with date, description, and amount information.")
 
-    uploaded = st.file_uploader("Upload bank/wallet statement", type=["csv"])
+    uploaded = st.file_uploader("Upload bank/wallet statement", type=["csv", "pdf"])
     if not uploaded:
         return
 
+    if uploaded.name.lower().endswith(".csv"):
+        imported = import_from_csv(uploaded)
+    else:
+        imported = import_from_pdf(uploaded)
+
+    if imported is None:
+        return
+
+    st.success(f"Imported {imported} transactions and auto-categorized them.")
+
+
+def import_from_csv(uploaded_file) -> Optional[int]:
     try:
-        df = pd.read_csv(uploaded)
+        df = pd.read_csv(uploaded_file)
     except Exception:
         st.error("Could not read CSV. Please use UTF-8 CSV.")
-        return
+        return None
 
     required = {"date", "description", "amount"}
     if not required.issubset(set(df.columns.str.lower())):
         st.error("CSV must include columns: date, description, amount")
-        return
+        return None
 
     lowered_cols = {c.lower(): c for c in df.columns}
     date_col, desc_col, amount_col = lowered_cols["date"], lowered_cols["description"], lowered_cols["amount"]
@@ -123,8 +136,70 @@ def upload_online_transactions() -> None:
             imported += 1
         except Exception:
             continue
+    return imported
 
-    st.success(f"Imported {imported} transactions and auto-categorized them.")
+
+def import_from_pdf(uploaded_file) -> Optional[int]:
+    st.info("PDF parsing is heuristic. Best results come from statements where each transaction line has date + amount.")
+
+    try:
+        reader = PdfReader(uploaded_file)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        st.error("Could not read PDF statement.")
+        return None
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    imported = 0
+
+    for line in lines:
+        parsed = parse_pdf_transaction_line(line)
+        if not parsed:
+            continue
+        tx_date, description, amount = parsed
+        add_expense(tx_date, description, amount, "Online", "PDF import")
+        imported += 1
+
+    if imported == 0:
+        st.warning(
+            "No transactions could be extracted from the PDF. "
+            "Please use CSV for best accuracy or a statement with plain transaction text."
+        )
+    return imported
+
+
+def parse_pdf_transaction_line(line: str) -> Optional[tuple[date, str, float]]:
+    date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", line)
+    if not date_match:
+        return None
+
+    amount_candidates = re.findall(r"[-+]?\d[\d,]*\.\d{2}", line)
+    if not amount_candidates:
+        return None
+
+    amount_str = amount_candidates[-1].replace(",", "")
+    try:
+        amount = abs(float(amount_str))
+    except ValueError:
+        return None
+
+    raw_date = date_match.group(1)
+    tx_date = None
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%m/%d/%Y", "%m-%d-%Y"):
+        try:
+            tx_date = datetime.strptime(raw_date, fmt).date()
+            break
+        except ValueError:
+            continue
+    if tx_date is None:
+        return None
+
+    description = re.sub(r"\s+", " ", line)
+    description = description.replace(raw_date, "").replace(amount_candidates[-1], "").strip(" -")
+    if not description:
+        description = "Statement transaction"
+
+    return tx_date, description, amount
 
 
 def add_cash_manually() -> None:
